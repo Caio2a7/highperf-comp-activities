@@ -2,33 +2,45 @@
 #include <math.h>
 #include <omp.h>
 
-#define DOTS_NUM 1000
-#define dot_b 10
-#define dot_a 1
+#define DX 100000000
+// intervalo [a,b]
+double b = 10;
+double a = 1;
 
 typedef double (*target_function)(double);
 
 void integral_aproximmation(target_function fn){
     double sum = 0;
-    for(size_t i = 1; i <= DOTS_NUM-1; i++){
-        sum += fn(i);
+    double dot = a;
+    double h = (b - a) / (double)DX;
+    for(int i = 1; i <= DX-1; i++){
+        sum += fn(dot);
+        dot = a+((h)*i);
     }
-    double dx = DOTS_NUM;
-    double h = (dx - 1) / dx;
-    double integral = h * ((fn(1)/2) + (fn(dx)/2) + sum);
+    double integral = h * ((fn(a)/2) + (fn(b)/2) + sum);
     printf("Integral: %.5lf\n", integral);
 } 
 
-// void derivative_aproximmation(target_function fn, double x){
+void derivative_aproximmation(target_function fn){
+    double h = (b - a) / (double)DX;
+    
+    double derivative = ((fn(a+h)) - (fn(a-h))) / (2*h);
+    printf("Derivative: %.5lf\n", derivative);
+}
 
-// }
 double quadratic(double base){
     return pow(base, 2);
 }
 
 int main(){
-
-    integral_aproximmation(quadratic);
-
+    #pragma omp parallel sections
+    {
+        printf("TID: %d\n", omp_get_thread_num());
+        #pragma omp section
+        integral_aproximmation(quadratic);
+        #pragma omp section
+        derivative_aproximmation(quadratic);
+    }    
+    
     return 0;
 }
