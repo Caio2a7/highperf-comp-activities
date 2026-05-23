@@ -36,7 +36,7 @@ void free_list(Node *head) {
 
 int main() {
     Node *head = NULL;
-
+    int tarefas = 0; 
     append(&head, "relatorio_janeiro.txt");
     append(&head, "relatorio_fevereiro.txt");
     append(&head, "relatorio_marco.txt");
@@ -46,15 +46,16 @@ int main() {
     append(&head, "log_erros.log");
     append(&head, "planilha_financeira.xlsx");
 
-    #pragma omp parallel
+    #pragma omp parallel num_threads(10)
     {
         #pragma omp single
         {
             Node *current = head;
             while (current != NULL) {
                 Node *node = current;
-                #pragma omp task firstprivate(node)
+                #pragma omp task firstprivate(node) 
                 {
+                    tarefas++;
                     printf("Arquivo: %-30s | Thread: %d\n",
                            node->filename, omp_get_thread_num());
                 }
@@ -62,7 +63,7 @@ int main() {
             }
         }
     }
-
+    printf("\nTotal de tarefas executadas: %d", tarefas);
     free_list(head);
     return 0;
 }
