@@ -8,7 +8,7 @@
 //              - v[i][j]n * (u[i][j+1]n - u[i][j-1]n) / (2*Δy)
 //              - u[i][j]n * (u[i+1][j]n - u[i-1][j]n) / (2*Δx) }
 
-#define VISCOSITY 100.5f // kinematic viscosity constant (V) 
+#define VISCOSITY 0.1f // kinematic viscosity constant (V) 
 #define TIME 10.0f // simulation duration in seconds(s)
 #define LX 10.0f // grid x length in meters(m)
 #define LY 10.0f // grid y length in meters(m)
@@ -26,15 +26,15 @@ void print_grid(int nx, int ny, float grid[nx][ny]){
     for(int i = 2; i < nx-2; i++){
         printf("[ ");
         for(int j = 2; j < ny-2; j++){
-            printf("%0.1lf ", grid[i][j]);
+            printf(" %0.5lf ", grid[i][j]);
         }
         printf(" ]\n");
     }
 }
 
 void initialize_grid(int nx, int ny){
-    for(int i = 0; i <= nx; i++){
-        for(int j = 0; j <= ny; j++){
+    for(int i = 0; i < nx; i++){
+        for(int j = 0; j < ny; j++){
             u[i][j] = 1.0f;
             v[i][j] = 1.0f;
         }
@@ -42,46 +42,55 @@ void initialize_grid(int nx, int ny){
 }
 
 void cfl_compute_time_spacing(float dx, float dy, float viscosity){
-    time_spacing = ((dx*dx) * (dy*dy)) / 2*viscosity*((dx*dx) + (dy*dy));
+    time_spacing = ((dx*dx) * (dy*dy)) / (2*viscosity*((dx*dx) + (dy*dy)));
 }
 
-float diffusion_in_x(float first_term, float second_term, float third_term, int n, float dx){
-    printf("diffusion_in_x: %0.5lf - First Term: %0.5lf - N: %d - First Pow: %0.5lf \n", (((powf(first_term, n)) - 2*(powf(second_term, n)) + powf(third_term, n)) / (dx*dx)), first_term, n, powf(first_term, n));
-
-    return ((powf(first_term, n)) - 2*(powf(second_term, n)) + powf(third_term, n)) / (dx*dx);
+float diffusion_in_x(float first_term, float second_term, float third_term, float dx){
+    return (first_term - 2*second_term + third_term) / (dx*dx);
 }
 
-float diffusion_in_y(float first_term, float second_term, float third_term, int n, float dy){
-    printf("diffusion_in_y: %0.5lf\n", ((powf(first_term, n)) - 2*(powf(second_term, n)) + powf(third_term, n)) / (dy*dy));
-    return ((powf(first_term, n)) - 2*(powf(second_term, n)) + powf(third_term, n)) / (dy*dy);
+float diffusion_in_y(float first_term, float second_term, float third_term, float dy){
+    return (first_term - 2*second_term + third_term) / (dy*dy);
 }
 
-float advection_in_x(float first_term, float second_term, float third_term, int n, float dx){
-    printf("advection_in_x: %0.5lf\n", ((powf(first_term, n)) * (powf(second_term, n) - powf(third_term, n))) / (dx*2));
-    return ((powf(first_term, n)) * (powf(second_term, n) - powf(third_term, n))) / (dx*2);
+float advection_in_x(float first_term, float second_term, float third_term, float dx){
+    return (first_term * (second_term - third_term)) / (dx*2);
 }
 
-float advection_in_y(float first_term, float second_term, float third_term, int n, float dy){
-    printf("advection_in_y: %0.5lf\n", ((powf(first_term, n)) * (powf(second_term, n) - powf(third_term, n))) / (dy*2));
-    return ((powf(first_term, n)) * (powf(second_term, n) - powf(third_term, n))) / (dy*2);
+float advection_in_y(float first_term, float second_term, float third_term, float dy){
+    return (first_term * (second_term - third_term)) / (dy*2);
 }
 
 void update_velocity(float dx, float dy, float dt, int nx, int ny, float viscosity){
-    int n = 0;
-            printf("N: %d\n", n);
+    float u_new[nx][ny];
+    float v_new[nx][ny];
+    
     for(int i = 1; i <= nx-2; i++){
         for(int j = 1; j <= ny-2; j++){
-            printf("N: %d\n", n);
-            u[i][j] = (powf(u[i][j], n)) + dt * (viscosity * (diffusion_in_x(u[i+1][j], u[i][j], u[i-1][j], n, dx) + diffusion_in_y(u[i][j+1], u[i][j], u[i][j-1], n, dy)) - advection_in_y(v[i][j], u[i][j+1], u[i][j-1], n, dy) - advection_in_x(u[i][j], u[i+1][j], u[i-1][j], dx, n));
+            u_new[i][j] = u[i][j] + dt * (viscosity * (diffusion_in_x(u[i+1][j], u[i][j], u[i-1][j], dx) + diffusion_in_y(u[i][j+1], u[i][j], u[i][j-1], dy)) - advection_in_y(v[i][j], u[i][j+1], u[i][j-1], dy) - advection_in_x(u[i][j], u[i+1][j], u[i-1][j], dx));
+            v_new[i][j] = v[i][j] + dt * (viscosity * (diffusion_in_x(v[i+1][j], v[i][j], v[i-1][j], dx) + diffusion_in_y(v[i][j+1], v[i][j], v[i][j-1], dy)) - advection_in_y(v[i][j], v[i][j+1], v[i][j-1], dy) - advection_in_x(u[i][j], v[i+1][j], v[i-1][j], dx));
         }
-        n +=  1;
+    }
+    
+    for(int i = 1; i <= nx-2; i++){
+        for(int j = 1; j <= ny-2; j++){
+            u[i][j] = u_new[i][j];
+            v[i][j] = v_new[i][j];
+        }
     }
 }
 
 int main(){
     cfl_compute_time_spacing(DX, DY, VISCOSITY);
     initialize_grid(GRID_POINTS_X, GRID_POINTS_Y);
-
-    update_velocity(DX, DY, time_spacing, GRID_POINTS_X, GRID_POINTS_Y, VISCOSITY);
-    print_grid(GRID_POINTS_X, GRID_POINTS_Y, u);
+    u[GRID_POINTS_X/2][GRID_POINTS_Y/2] = 2.0f;
+    v[GRID_POINTS_X/2][GRID_POINTS_Y/2] = 2.0f;
+    float t = 0.0f;
+    
+    while(t < TIME){
+        update_velocity(DX, DY, time_spacing, GRID_POINTS_X, GRID_POINTS_Y, VISCOSITY);
+        print_grid(GRID_POINTS_X, GRID_POINTS_Y, u);
+        t += time_spacing;
+        time_step++;
+    }
 }
