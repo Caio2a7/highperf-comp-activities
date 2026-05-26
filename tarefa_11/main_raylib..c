@@ -2,7 +2,9 @@
 #include <stdio.h>
 #include <math.h>
 #include <omp.h>
-#include "raylib.h"
+#include "pkg/include/raylib.h"
+#include "pkg/include/raymath.h"
+#include "pkg/include/rlgl.h"
 
 #define VISCOSITY 0.1f
 #define TIME 10.0f
@@ -95,14 +97,14 @@ float advection_in_y(float first_term, float second_term, float third_term, floa
 void update_velocity(float dx, float dy, float dt, int nx, int ny, float viscosity) {
     float u_new[nx][ny];
     float v_new[nx][ny];
-
+    #pragma omp for
     for (int i = 1; i <= nx-2; i++) {
         for (int j = 1; j <= ny-2; j++) {
             u_new[i][j] = u[i][j] + dt * (viscosity * (diffusion_in_x(u[i+1][j], u[i][j], u[i-1][j], dx) + diffusion_in_y(u[i][j+1], u[i][j], u[i][j-1], dy)) - advection_in_y(v[i][j], u[i][j+1], u[i][j-1], dy) - advection_in_x(u[i][j], u[i+1][j], u[i-1][j], dx));
             v_new[i][j] = v[i][j] + dt * (viscosity * (diffusion_in_x(v[i+1][j], v[i][j], v[i-1][j], dx) + diffusion_in_y(v[i][j+1], v[i][j], v[i][j-1], dy)) - advection_in_y(v[i][j], v[i][j+1], v[i][j-1], dy) - advection_in_x(u[i][j], v[i+1][j], v[i-1][j], dx));
         }
-    }
-
+    }   
+    #pragma omp for
     for (int i = 1; i <= nx-2; i++) {
         for (int j = 1; j <= ny-2; j++) {
             u[i][j] = u_new[i][j];
@@ -114,25 +116,31 @@ void update_velocity(float dx, float dy, float dt, int nx, int ny, float viscosi
 int main() {
     cfl_compute_time_spacing(DX, DY, VISCOSITY);
     initialize_grid(GRID_POINTS_X, GRID_POINTS_Y);
-
+    
     initialize_perturbation(GRID_POINTS_X, GRID_POINTS_Y);
-
+    
     float t = 0.0f;
-
+    
     InitWindow(WINDOW_W, WINDOW_H, "Navier-Stokes");
     SetTargetFPS(60);
-
+    
     while (!WindowShouldClose() && t < TIME) {
-        update_velocity(DX, DY, time_spacing, GRID_POINTS_X, GRID_POINTS_Y, VISCOSITY);
-        t += time_spacing;
-        time_step++;
-
-        BeginDrawing();
-            ClearBackground(BLACK);
-            render_grid(GRID_POINTS_X, GRID_POINTS_Y, u);
-        EndDrawing();
+        #pragma omp parallel
+        {
+            #pragma omp master
+            {
+                BeginDrawing();
+                    ClearBackground(BLACK);
+                    render_grid(GRID_POINTS_X, GRID_POINTS_Y, u);
+                EndDrawing();
+            }
+            
+            update_velocity(DX, DY, time_spacing, GRID_POINTS_X, GRID_POINTS_Y, VISCOSITY);
+            
+            t += time_spacing;
+            time_step++;
+        }
     }
-
     while (!WindowShouldClose()) {
         BeginDrawing();
             render_grid(GRID_POINTS_X, GRID_POINTS_Y, u);
