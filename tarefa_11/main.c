@@ -12,8 +12,8 @@
 #define TIME 10.0f // simulation duration in seconds(s)
 #define LX 10.0f // grid x length in meters(m)
 #define LY 10.0f // grid y length in meters(m)
-#define GRID_POINTS_X 10 // discrete points in x-axis 
-#define GRID_POINTS_Y 10 // discrete points in y-axis
+#define GRID_POINTS_X 300 // discrete points in x-axis 
+#define GRID_POINTS_Y 300 // discrete points in y-axis
 #define DX (LX / (GRID_POINTS_X-1)) // (Δx) space between x-points
 #define DY (LY / (GRID_POINTS_Y-1)) // (Δy) space between y-points
 float u[GRID_POINTS_X][GRID_POINTS_Y]; // fluid velocity in x
@@ -33,6 +33,7 @@ void print_grid(int nx, int ny, float grid[nx][ny]){
 }
 
 void initialize_grid(int nx, int ny){
+    #pragma omp for
     for(int i = 0; i < nx; i++){
         for(int j = 0; j < ny; j++){
             u[i][j] = 1.0f;
@@ -65,13 +66,14 @@ void update_velocity(float dx, float dy, float dt, int nx, int ny, float viscosi
     float u_new[nx][ny];
     float v_new[nx][ny];
     
+    #pragma omp for
     for(int i = 1; i <= nx-2; i++){
         for(int j = 1; j <= ny-2; j++){
             u_new[i][j] = u[i][j] + dt * (viscosity * (diffusion_in_x(u[i+1][j], u[i][j], u[i-1][j], dx) + diffusion_in_y(u[i][j+1], u[i][j], u[i][j-1], dy)) - advection_in_y(v[i][j], u[i][j+1], u[i][j-1], dy) - advection_in_x(u[i][j], u[i+1][j], u[i-1][j], dx));
             v_new[i][j] = v[i][j] + dt * (viscosity * (diffusion_in_x(v[i+1][j], v[i][j], v[i-1][j], dx) + diffusion_in_y(v[i][j+1], v[i][j], v[i][j-1], dy)) - advection_in_y(v[i][j], v[i][j+1], v[i][j-1], dy) - advection_in_x(u[i][j], v[i+1][j], v[i-1][j], dx));
         }
     }
-    
+    #pragma omp for
     for(int i = 1; i <= nx-2; i++){
         for(int j = 1; j <= ny-2; j++){
             u[i][j] = u_new[i][j];
@@ -81,16 +83,19 @@ void update_velocity(float dx, float dy, float dt, int nx, int ny, float viscosi
 }
 
 int main(){
-    cfl_compute_time_spacing(DX, DY, VISCOSITY);
-    initialize_grid(GRID_POINTS_X, GRID_POINTS_Y);
-    u[GRID_POINTS_X/2][GRID_POINTS_Y/2] = 2.0f;
-    v[GRID_POINTS_X/2][GRID_POINTS_Y/2] = 2.0f;
-    float t = 0.0f;
-    
-    while(t < TIME){
-        update_velocity(DX, DY, time_spacing, GRID_POINTS_X, GRID_POINTS_Y, VISCOSITY);
-        print_grid(GRID_POINTS_X, GRID_POINTS_Y, u);
-        t += time_spacing;
-        time_step++;
+    #pragma omp parallel
+    {
+        cfl_compute_time_spacing(DX, DY, VISCOSITY);
+        initialize_grid(GRID_POINTS_X, GRID_POINTS_Y);
+        u[GRID_POINTS_X/2][GRID_POINTS_Y/2] = 2.0f;
+        v[GRID_POINTS_X/2][GRID_POINTS_Y/2] = 2.0f;
+        
+        float t = 0.0f;
+        while(t < TIME){
+            update_velocity(DX, DY, time_spacing, GRID_POINTS_X, GRID_POINTS_Y, VISCOSITY);
+            // print_grid(GRID_POINTS_X, GRID_POINTS_Y, u);
+            t += time_spacing;
+            time_step++;
+        }
     }
 }
