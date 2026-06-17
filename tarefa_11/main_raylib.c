@@ -3,9 +3,8 @@
 #include <omp.h>
 #include "raylib.h"
 #include <stdlib.h>
-#include <time.h>
 
-#define VISCOSITY 0.1f
+#define VISCOSITY 0.02f
 #define TIME 10.0f
 #define LX 20.0f
 #define LY 20.0f
@@ -37,31 +36,32 @@ float time_spacing = 1.0;
 Image img;
 Texture2D tex;
 
-void render_grid(int nx, int ny, int wx, int wy, float *grid) {
-    float min_val = grid[IDX(0,0)], max_val = grid[IDX(0,0)];
-    // Stage 1 - Iteração sobre os pontos da malha para descobrir seus valores máximos de velocidade (importante para determinar a coloração)
+void render_grid(int nx, int ny, int wx, int wy, float *u_grid, float *v_grid) {
+    float max_val = 0.0001f;
+    // Stage 1 - busca o maior valor de magnitude de velocidade do vetor (u,v)
+    // magnitude = sqrt(u² + v²) representa a velocidade real do fluido em cada ponto
+    #pragma omp parallel for collapse(2) schedule(static) reduction(max:max_val)
     for (int i = 0; i < nx; i++)
         for (int j = 0; j < ny; j++) {
-            if (grid[IDX(i,j)] < min_val) min_val = grid[IDX(i,j)];
-            if (grid[IDX(i,j)] > max_val) max_val = grid[IDX(i,j)];
+            float mag = sqrtf(u_grid[IDX(i,j)]*u_grid[IDX(i,j)] + v_grid[IDX(i,j)]*v_grid[IDX(i,j)]);
+            if (mag > max_val) max_val = mag;
         }
-    float range = max_val - min_val;
-    if (range == 0.0f) range = 1.0f;
 
     Color *pixels = (Color*)img.data;
     // Iteração sobre os pontos da malha
     for (int i = 0; i < nx; i++) {
         for (int j = 0; j < ny; j++) {
-            float t = (grid[IDX(i,j)] - min_val) / range;
+            float mag = sqrtf(u_grid[IDX(i,j)]*u_grid[IDX(i,j)] + v_grid[IDX(i,j)]*v_grid[IDX(i,j)]);
+            float t = mag / max_val;
             // Stage 2 - Tradução do valor do ponto da malha (sua velocidade) para uma cor (1 - t) * 240
-              // 240 é o máximo de coloração (azul) 0 é o mínimo vermelho e como t varia entre [0,1] temos esse range de cor
+            // 240 é o máximo de coloração (azul) 0 é o mínimo vermelho e como t varia entre [0,1] temos esse range de cor
             // Stage 3 - Conversão da quantidade de pontos discretizados da malha para quadradinho de pixels desenhados na tela
-              // Exp: Para 200x200 pontos numa tela 800x800 pixels teremos um quadradinho de 4x4 pixels para representar 1 ponto da malha  
+            // Exp: Para 200x200 pontos numa tela 800x800 pixels teremos um quadradinho de 4x4 pixels para representar 1 ponto da malha  
             // Regra de 3 direta entre pontos da malha para pixels
-              // Exp: Digamos para o ponto i = 3 da malha, para nx=200 e wx=200
-              // 200 - 800
-              //  3  -  x0
-              // Sendo x0 a posição do pixel exato na tela aonde começa as coordenadas do quadradinho e por isso (i*wx) / nx que é basicamente (3*800)/200
+            // Exp: Digamos para o ponto i = 3 da malha, para nx=200 e wx=200
+            // 200 - 800
+            //  3  -  x0
+            // Sendo x0 a posição do pixel exato na tela aonde começa as coordenadas do quadradinho e por isso (i*wx) / nx que é basicamente (3*800)/200
             // pixels[j * nx + i] mapeia (i,j) da malha para posição linear na imagem (row-major de pixels)
             pixels[j * nx + i] = ColorFromHSV((1.0f - t) * 240.0f, 1.0f, 1.0f);
         }
@@ -78,9 +78,10 @@ void render_grid(int nx, int ny, int wx, int wy, float *grid) {
 void initialize_grid(int nx, int ny) {
     for (int i = 0; i < nx; i++)
         for (int j = 0; j < ny; j++) {
-            u_curr[IDX(i,j)] = 4.0f;
+            // fluido em repouso — sem velocidade inicial em nenhuma direção
+            u_curr[IDX(i,j)] = 0.0f;
             v_curr[IDX(i,j)] = 0.0f;
-            u_next[IDX(i,j)] = 4.0f;
+            u_next[IDX(i,j)] = 0.0f;
             v_next[IDX(i,j)] = 0.0f;
         }
 }
@@ -88,14 +89,24 @@ void initialize_grid(int nx, int ny) {
 void centric_circle_perturbation(int nx, int ny) {
     float cx = LX / 2.0f;
     float cy = LY / 2.0f;
-    float radius = LX * 0.1f;
+    float radius = LX * 0.08f;
+    float strength = 1.5f;
+
     for (int i = 0; i < nx; i++) {
         for (int j = 0; j < ny; j++) {
             float x = i * DX;
             float y = j * DY;
-            float dist = sqrtf((x - cx)*(x - cx) + (y - cy)*(y - cy));
-            if (dist < radius) {          
-                u_curr[IDX(i,j)] += 0.5f;
+            float dx = x - cx;
+            float dy = y - cy;
+            float dist = sqrtf(dx*dx + dy*dy);
+            // perturbação radial — cada ponto dentro do círculo recebe velocidade
+            // apontando para fora do centro, simulando uma pedra caindo na água
+            if (dist < radius && dist > 0.001f) {
+                float intensity = strength * (1.0f - dist / radius);
+                u_curr[IDX(i,j)] += intensity * (dx / dist);
+                v_curr[IDX(i,j)] += intensity * (dy / dist);
+                u_next[IDX(i,j)]  = u_curr[IDX(i,j)];
+                v_next[IDX(i,j)]  = v_curr[IDX(i,j)];
             }
         }
     }
@@ -113,8 +124,8 @@ void wave_perturbation(int nx, int ny) {
 void chaotic_perturbation(int nx, int ny) {
     srand(42); // semente fixa para reprodutibilidade — troque para srand(time(NULL)) se quiser diferente a cada execução
 
-    int n_vortices = 80;
-    float vortex_radius = LX * 0.03f; // vórtices pequenos
+    int n_vortices = 70;
+    float vortex_radius = LX * 0.05f; // vórtices pequenos
 
     for (int k = 0; k < n_vortices; k++) {
         // posição e rotação aleatórias
@@ -122,7 +133,7 @@ void chaotic_perturbation(int nx, int ny) {
         float cy = ((float)rand() / RAND_MAX) * LY;
         float sign = (rand() % 2 == 0) ? 1.0f : -1.0f;
         float strength = 0.2f + ((float)rand() / RAND_MAX) * 0.8f; // intensidade variável entre 0.2 e 1.0
-
+        
         for (int i = 0; i < nx; i++) {
             for (int j = 0; j < ny; j++) {
                 float x = i * DX;
@@ -161,69 +172,92 @@ float advection_in_y(float first_term, float second_term, float third_term, floa
     return (first_term * (second_term - third_term)) / (dy*2);
 }
 
-void update_velocity(float dx, float dy, float dt, int nx, int ny, float viscosity) {
-    #pragma omp parallel for collapse(2)
-    for (int i = 1; i <= nx-2; i++) {
-        for (int j = 1; j <= ny-2; j++) {
-            u_next[IDX(i,j)] = u_curr[IDX(i,j)] + dt * (
-                viscosity * (
-                    diffusion_in_x(u_curr[IDX(i+1,j)], u_curr[IDX(i,j)], u_curr[IDX(i-1,j)], dx) +
-                    diffusion_in_y(u_curr[IDX(i,j+1)], u_curr[IDX(i,j)], u_curr[IDX(i,j-1)], dy)
-                )
-                - advection_in_x(u_curr[IDX(i,j)], u_curr[IDX(i+1,j)], u_curr[IDX(i-1,j)], dx)
-                - advection_in_y(v_curr[IDX(i,j)], u_curr[IDX(i,j+1)], u_curr[IDX(i,j-1)], dy)
-            );
-            v_next[IDX(i,j)] = v_curr[IDX(i,j)] + dt * (
-                viscosity * (
-                    diffusion_in_x(v_curr[IDX(i+1,j)], v_curr[IDX(i,j)], v_curr[IDX(i-1,j)], dx) +
-                    diffusion_in_y(v_curr[IDX(i,j+1)], v_curr[IDX(i,j)], v_curr[IDX(i,j-1)], dy)
-                )
-                - advection_in_x(u_curr[IDX(i,j)], v_curr[IDX(i+1,j)], v_curr[IDX(i-1,j)], dx)
-                - advection_in_y(v_curr[IDX(i,j)], v_curr[IDX(i,j+1)], v_curr[IDX(i,j-1)], dy)
-            );
-        }
-    }
-
-    // swap grids
-    float *tmp;
-    tmp    = u_curr;  u_curr = u_next;  u_next = tmp;
-    tmp    = v_curr;  v_curr = v_next;  v_next = tmp;
-}
 
 int main() {
+    omp_set_num_threads(20);
+
     cfl_compute_time_spacing(DX, DY, VISCOSITY);
     initialize_grid(GRID_POINTS_X, GRID_POINTS_Y);
-    
     chaotic_perturbation(GRID_POINTS_X, GRID_POINTS_Y);
-    
-    float t = 0.0f;
-    
+    // centric_circle_perturbation(GRID_POINTS_X, GRID_POINTS_Y);
+
     InitWindow(WINDOW_W, WINDOW_H, "Navier-Stokes");
     SetTargetFPS(60);
-
-    // inicializa imagem em CPU e textura em GPU uma única vez
     img = GenImageColor(GRID_POINTS_X, GRID_POINTS_Y, BLACK);
     tex = LoadTextureFromImage(img);
-    
-    // roda N passos de simulação por frame para compensar time_spacing pequeno em malhas densas
+
+    float t = 0.0f;
+    double t0, t1;
     int steps_per_frame = (int)(0.01f / time_spacing) + 1;
+    int running = 1;
 
-    while (!WindowShouldClose() && t < TIME) {
-        BeginDrawing();
-            ClearBackground(BLACK);
-            render_grid(GRID_POINTS_X, GRID_POINTS_Y, WINDOW_W, WINDOW_H, u_curr);
-        EndDrawing();
-      
-        for (int s = 0; s < steps_per_frame; s++) {
-            update_velocity(DX, DY, time_spacing, GRID_POINTS_X, GRID_POINTS_Y, VISCOSITY);
-            t += time_spacing;
+    #pragma omp parallel shared(t, time_step, running, u_curr, u_next, v_curr, v_next)
+    {
+        while (running && t < TIME) {
+
+            // render — obrigatoriamente thread 0 (contexto OpenGL vinculado à thread principal)
+            #pragma omp master
+            {
+                BeginDrawing();
+                    ClearBackground(BLACK);
+                    render_grid(GRID_POINTS_X, GRID_POINTS_Y, WINDOW_W, WINDOW_H, u_curr, v_curr);
+                EndDrawing();
+                running = !WindowShouldClose();
+            }
+            #pragma omp barrier
+
+            for (int s = 0; s < steps_per_frame; s++) {
+                #pragma omp master
+                { t0 = omp_get_wtime(); }
+                #pragma omp barrier
+                // schedule(static, GRID_POINTS_Y) alinha chunks a linhas inteiras
+                // É neste loop duplo que ocorre de fato o calculo das mudanças de velocidade em decorrer do tempo das particulas do fluido vide termo de navier-stokes para viscosidade 2d e discreto
+                #pragma omp for collapse(2) schedule(static, GRID_POINTS_X)
+                for (int i = 1; i <= GRID_POINTS_X-2; i++) {
+                    for (int j = 1; j <= GRID_POINTS_Y-2; j++) {
+                        u_next[IDX(i,j)] = u_curr[IDX(i,j)] + time_spacing * (
+                            VISCOSITY * (
+                                diffusion_in_x(u_curr[IDX(i+1,j)], u_curr[IDX(i,j)], u_curr[IDX(i-1,j)], DX) +
+                                diffusion_in_y(u_curr[IDX(i,j+1)], u_curr[IDX(i,j)], u_curr[IDX(i,j-1)], DY)
+                            )
+                            - advection_in_x(u_curr[IDX(i,j)], u_curr[IDX(i+1,j)], u_curr[IDX(i-1,j)], DX)
+                            - advection_in_y(v_curr[IDX(i,j)], u_curr[IDX(i,j+1)], u_curr[IDX(i,j-1)], DY)
+                        );
+                        v_next[IDX(i,j)] = v_curr[IDX(i,j)] + time_spacing * (
+                            VISCOSITY * (
+                                diffusion_in_x(v_curr[IDX(i+1,j)], v_curr[IDX(i,j)], v_curr[IDX(i-1,j)], DX) +
+                                diffusion_in_y(v_curr[IDX(i,j+1)], v_curr[IDX(i,j)], v_curr[IDX(i,j-1)], DY)
+                            )
+                            - advection_in_x(u_curr[IDX(i,j)], v_curr[IDX(i+1,j)], v_curr[IDX(i-1,j)], DX)
+                            - advection_in_y(v_curr[IDX(i,j)], v_curr[IDX(i,j+1)], v_curr[IDX(i,j-1)], DY)
+                        );
+                    }
+                }
+
+                #pragma omp master
+                {
+                    // swap grids
+                    float *tmp;
+                    tmp    = u_curr;  u_curr = u_next;  u_next = tmp;
+                    tmp    = v_curr;  v_curr = v_next;  v_next = tmp;
+
+                    t1 = omp_get_wtime();
+                    printf("Grid update in: %0.5lfs\n", t1 - t0);
+                    t += time_spacing;
+                }
+                #pragma omp barrier
+            }
+
+            #pragma omp master
+            { time_step++; }
+            #pragma omp barrier
         }
-
-        time_step++;
     }
+
+    // loop de render final após simulação concluída
     while (!WindowShouldClose()) {
         BeginDrawing();
-            render_grid(GRID_POINTS_X, GRID_POINTS_Y, WINDOW_W, WINDOW_H, u_curr);
+          render_grid(GRID_POINTS_X, GRID_POINTS_Y, WINDOW_W, WINDOW_H, u_curr, v_curr);
         EndDrawing();
     }
 

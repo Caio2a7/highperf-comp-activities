@@ -7,21 +7,23 @@
 #define TIME 10.0f
 #define LX 20.0f
 #define LY 20.0f
-#define GRID_POINTS_X 800
-#define GRID_POINTS_Y 800
-#define DX (LX / (GRID_POINTS_X - 1))
-#define DY (LY / (GRID_POINTS_Y - 1))
+
+int GRID_POINTS_X;
+int GRID_POINTS_Y;
+float DX;
+float DY;
+
 #define IDX(i, j) ((i) * GRID_POINTS_Y + (j))
 
-float u_buf_a[GRID_POINTS_X * GRID_POINTS_Y];
-float u_buf_b[GRID_POINTS_X * GRID_POINTS_Y];
-float v_buf_a[GRID_POINTS_X * GRID_POINTS_Y];
-float v_buf_b[GRID_POINTS_X * GRID_POINTS_Y];
+float *u_buf_a;
+float *u_buf_b;
+float *v_buf_a;
+float *v_buf_b;
 
-float *u_curr = u_buf_a;
-float *u_next = u_buf_b;
-float *v_curr = v_buf_a;
-float *v_next = v_buf_b;
+float *u_curr;
+float *u_next;
+float *v_curr;
+float *v_next;
 
 float time_spacing = 1.0f;
 
@@ -126,7 +128,27 @@ void print_timing_summary(int steps, double total_wall, double total_step_time) 
     printf("====================================\n");
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        fprintf(stderr, "Uso: %s <GRID_POINTS_X> <GRID_POINTS_Y>\n", argv[0]);
+        return 1;
+    }
+
+    GRID_POINTS_X = atoi(argv[1]);
+    GRID_POINTS_Y = atoi(argv[2]);
+    DX = LX / (GRID_POINTS_X - 1);
+    DY = LY / (GRID_POINTS_Y - 1);
+
+    u_buf_a = malloc(GRID_POINTS_X * GRID_POINTS_Y * sizeof(float));
+    u_buf_b = malloc(GRID_POINTS_X * GRID_POINTS_Y * sizeof(float));
+    v_buf_a = malloc(GRID_POINTS_X * GRID_POINTS_Y * sizeof(float));
+    v_buf_b = malloc(GRID_POINTS_X * GRID_POINTS_Y * sizeof(float));
+
+    u_curr = u_buf_a;
+    u_next = u_buf_b;
+    v_curr = v_buf_a;
+    v_next = v_buf_b;
+
     cfl_compute_time_spacing(DX, DY, VISCOSITY);
     initialize_grid(GRID_POINTS_X, GRID_POINTS_Y);
     chaotic_perturbation(GRID_POINTS_X, GRID_POINTS_Y);
@@ -188,6 +210,11 @@ int main() {
 
     double sim_end = omp_get_wtime();
     print_timing_summary(total_steps, sim_end - sim_start, total_step_time);
+
+    free(u_buf_a);
+    free(u_buf_b);
+    free(v_buf_a);
+    free(v_buf_b);
 
     return 0;
 }
