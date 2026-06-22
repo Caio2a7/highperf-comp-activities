@@ -146,7 +146,7 @@ int main() {
             { t0 = omp_get_wtime(); }
             #pragma omp barrier
 
-            #pragma omp for collapse(2) schedule(static, GRID_POINTS_X)
+            #pragma omp for collapse(2) schedule(static)
             for (int i = 1; i <= GRID_POINTS_X - 2; i++) {
                 for (int j = 1; j <= GRID_POINTS_Y - 2; j++) {
                     u_next[IDX(i, j)] = u_curr[IDX(i, j)] + time_spacing * (
